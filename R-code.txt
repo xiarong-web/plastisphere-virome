@@ -1,0 +1,156 @@
+###t-Test
+
+library(stats)
+t_test_PE <- t.test(data_cleaned_PE$Plastisphere, data_cleaned_PE$Environment)
+p_values <- c(t_test_PE$p.value, t_test_BN$p.value)
+p_adj <- p.adjust(p_values, method = "bonferroni")
+
+results <- data.frame(
+  Comparison = c("Plastisphere vs Environment", "B_plastisphere vs N_plastisphere"),
+  t_statistic = c(t_test_PE$statistic, t_test_BN$statistic),
+  p_value = p_values,
+  p_value_bonferroni = p_adj
+)
+
+write.csv(results, file = "t_test_results.csv", row.names = FALSE)
+
+####map
+library(tidyverse)
+library(ggplot2)
+library(ggstar)
+library(readxl)
+sample_data<-read_excel("R-样本数据坐标处理.xlsx",
+                  sheet = "fig")
+world<-map_data("world")
+ggplot() +
+  geom_polygon(data=world,aes(x=long,y=lat,group=group),
+               fill="#dedede")+
+  theme_bw()+
+  scale_y_continuous(expand = expansion(mult=c(0,0)))+
+  scale_x_continuous(expand = expansion(add=c(0,0))) -> world.map
+
+world.map
+
+world.map+
+  geom_star(data=sample_data,
+            aes(x=longitude,y=latitude,
+                starshape=carrier,
+                color=`ecosystem`,
+                fill=`ecosystem`,
+                size=number),
+            alpha = 0.6,
+            position = position_jitter(width = 10,
+                                       height = 10,
+                                       seed = 1234))+
+  scale_starshape_manual(values=c(15,11))+
+  scale_fill_manual(values=c("#BF6969",  "#70A86B", "#5692E1","#CC9900"))+
+  scale_color_manual(values=c("#BF6969",  "#70A86B", "#5692E1","#CC9900"))-> world.map01
+  
+world.map01 +
+  geom_point(data=sample_data,
+             aes(x=longitude,y=latitude,
+                 shape=type),
+             position = position_jitter(width = 10,
+                                        height = 10,
+                                        seed = 1234))+
+  scale_shape_manual(values = c(3,4,8),
+                     name= expression("Sample type"))+
+  theme(#legend.position = c(0.5,0.5),
+    legend.background = element_rect(fill = "transparent"))+
+  labs(x="Longitude",y="Latitude")->sample_map_R
+
+ggsave("sample_map_R.pdf", sample_map_R, width = 12,height = 7)
+
+
+###alpha_diversity
+library(vegan)  
+library(openxlsx)
+alpha <- function(x, tree = NULL, base = exp(1)) {
+  est <- estimateR(x)
+  Richness <- est[1, ]
+  Chao1 <- est[2, ]
+  ACE <- est[4, ]
+  Shannon <- diversity(x, index = 'shannon', base = base)
+  Simpson <- diversity(x, index = 'simpson') #Gini-Simpson 指数
+  Pielou <- Shannon / log(Richness, base)
+  goods_coverage <- 1 - rowSums(x == 1) / rowSums(x)
+  
+  result <- data.frame(Richness, Shannon, Simpson, Pielou,
+                       Chao1, ACE, goods_coverage)
+  
+  result
+}
+
+alpha_all <-alpha(otu, base = 2)
+
+
+### R-bipartite
+library(vegan)
+library(permute)
+library(lattice)
+library(statnet.common)
+library(network)
+library(sna)
+library(bipartite)
+library(tidyverse)
+library(data.table)
+library(openxlsx)
+library(igraph)
+
+biofilm <- read.csv("bipartite网络指标计算-biofilm.csv",header=T,encoding="UTF-8")
+env <- read.csv("bipartite网络指标计算-env.csv",header=T,encoding="UTF-8")
+#转化为行和列对应的关系
+biofilm_trans <- spread(biofilm, Subject_id, links, fill = 0)
+env_trans <- spread(env, Subject_id, links, fill = 0)
+# 将第一列设置为列名
+names(biofilm_trans)[1] <- "row_names"
+names(env_trans)[1] <- "row_names"
+# 将数据框的第一列设置为行名
+row.names(biofilm_trans) <- biofilm_trans[,1]
+row.names(env_trans) <- env_trans[,1]
+# 删除原始数据框的第一列
+biofilm_trans <- biofilm_trans[,-1]
+env_trans <- env_trans[,-1]
+# 将数据框转换为data.table
+biofilm_df <- as.data.table(biofilm_trans)
+env_df <- as.data.table(env_trans)
+#将数据转化为矩阵
+biofilm_web<-as.matrix(biofilm_df)
+env_web<-as.matrix(env_df)
+#将biofilm_trans的行名赋值给biofilm_web
+rownames(biofilm_web) <- rownames(biofilm_trans)
+rownames(env_web) <- rownames(env_trans)
+#可视化web
+visweb(biofilm_web)
+visweb(env_web)
+plotweb(biofilm_web,text.rot=90)
+plotweb(env_web,text.rot=90)
+
+#计算网络及个体层面的index
+biofilm_index_networklevel <-networklevel(biofilm_web, index="ALL")
+env_index_networklevel <-networklevel(env_web, index="ALL")
+biofilm_index_specieslevel <-specieslevel(biofilm_web, index="ALL")
+env_index_specieslevel <-specieslevel(env_web, index="ALL")
+
+# 安装 openxlsx 包（如果未安装）
+#install.packages("openxlsx")
+
+write.csv(do.call(rbind, biofilm_index_networklevel), "biofilm_index_networklevel.csv", row.names = T)
+write.csv(do.call(rbind, env_index_networklevel), "env_index_networklevel.csv", row.names = T)
+
+####这样导出来没有列名和行名
+# 创建一个Excel文件
+wb <- createWorkbook()
+
+# 循环处理每个数据结构
+for (name in names(env_index_specieslevel)) {
+  # 提取数据结构
+  data <- env_index_specieslevel[[name]]
+  
+  # 创建一个新的工作表，并将数据写入工作表
+  addWorksheet(wb, sheetName = name)
+  writeData(wb, sheet = name, x = data, colNames = TRUE, rowNames = TRUE)
+}
+
+# 保存Excel文件
+saveWorkbook(wb, file = "env_index_specieslevel.xlsx", overwrite = TRUE)
